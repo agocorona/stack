@@ -266,9 +266,9 @@ getSetupExe :: (StackM env m, HasEnvConfig env)
             -> m (Maybe (Path Abs File))
 getSetupExe setupHs setupShimHs tmpdir = do
     wc <- getWhichCompiler
-    econfig <- asks getEnvConfigLocal
+    econfig <- view envConfigLocalL
     platformDir <- platformGhcRelDir
-    config <- asks getConfig
+    config <- view configL
     let baseNameS = concat
             [ "Cabal-simple_"
             , simpleSetupHash
@@ -336,7 +336,7 @@ withExecuteEnv menv bopts boptsCli baseConfigOpts locals globalPackages snapshot
         configLock <- newMVar ()
         installLock <- newMVar ()
         idMap <- liftIO $ newTVarIO Map.empty
-        config <- asks (getConfig . getEnvConfig)
+        config <- view configL
 
         -- Create files for simple setup and setup shim, if necessary
         let setupSrcDir =
@@ -394,7 +394,7 @@ withExecuteEnv menv bopts boptsCli baseConfigOpts locals globalPackages snapshot
             -- No log files generated, nothing to dump
             [] -> return ()
             firstLog:_ -> do
-                toDump <- asks (configDumpLogs . getConfig)
+                toDump <- view $ configL.to configDumpLogs
                 case toDump of
                     DumpAllLogs -> mapM_ (dumpLog "") allLogs
                     DumpWarningLogs -> mapM_ dumpLogIfWarning allLogs
@@ -452,18 +452,18 @@ executePlan :: (StackM env m, HasEnvConfig env)
             -> m ()
 executePlan menv boptsCli baseConfigOpts locals globalPackages snapshotPackages localPackages installedMap targets plan = do
     $logDebug "Executing the build plan"
-    bopts <- asks (configBuild . getConfig)
+    bopts <- view buildOptsL
     withExecuteEnv menv bopts boptsCli baseConfigOpts locals globalPackages snapshotPackages localPackages (executePlan' installedMap targets plan)
 
     unless (Map.null $ planInstallExes plan) $ do
         snapBin <- (</> bindirSuffix) `liftM` installationRootDeps
         localBin <- (</> bindirSuffix) `liftM` installationRootLocal
-        destDir <- asks $ configLocalBin . getConfig
+        destDir <- view $ configL.to configLocalBin
         ensureDir destDir
 
         destDir' <- liftIO . D.canonicalizePath . toFilePath $ destDir
 
-        platform <- asks getPlatform
+        platform <- view platformL
         let ext =
                 case platform of
                     Platform _ Windows -> ".exe"
@@ -550,7 +550,7 @@ executePlan menv boptsCli baseConfigOpts locals globalPackages snapshotPackages 
                     , " not found on the PATH environment variable"
                     ]
 
-    config <- asks getConfig
+    config <- view configL
     menv' <- liftIO $ configEnvOverride config EnvSettings
                     { esIncludeLocals = True
                     , esIncludeGhcPackagePath = True
@@ -616,8 +616,8 @@ executePlan' installedMap0 targets plan ee@ExecuteEnv {..} = do
             (fmap (\f -> (Nothing, Just f)))
             (planTasks plan)
             (planFinals plan)
-    threads <- asks $ configJobs . getConfig
-    concurrentTests <- asks $ configConcurrentTests . getConfig
+    threads <- view $ configL.to configJobs
+    concurrentTests <- view $ configL.to configConcurrentTests
     let keepGoing =
             fromMaybe (boptsTests eeBuildOpts || boptsBenchmarks eeBuildOpts) (boptsKeepGoing eeBuildOpts)
         concurrentFinal =
@@ -627,7 +627,7 @@ executePlan' installedMap0 targets plan ee@ExecuteEnv {..} = do
             if boptsTests eeBuildOpts
                 then concurrentTests
                 else True
-    terminal <- asks getTerminal
+    terminal <- view terminalL
     errs <- liftIO $ runActions threads keepGoing concurrentFinal actions $ \doneVar -> do
         let total = length actions
             loop prev
@@ -727,7 +727,7 @@ getConfigCache :: (StackM env m, HasEnvConfig env)
                => ExecuteEnv -> Task -> InstalledMap -> Bool -> Bool
                -> m (Map PackageIdentifier GhcPkgId, ConfigCache)
 getConfigCache ExecuteEnv {..} Task {..} installedMap enableTest enableBench = do
-    useExactConf <- asks (configAllowNewer . getConfig)
+    useExactConf <- view $ configL.to configAllowNewer
     let extra =
             -- We enable tests if the test suite dependencies are already
             -- installed, so that we avoid unnecessary recompilation based on
@@ -900,7 +900,7 @@ withSingleContext runInBase ActionContext {..} ExecuteEnv {..} task@Task {..} md
                 $ \h -> inner (Just (logPath, h))
 
     withCabal package pkgDir mlogFile inner = do
-        config <- asks getConfig
+        config <- view configL
 
         unless (configAllowDifferentUser config) $
             checkOwnership (pkgDir </> configWorkDir config)
@@ -1238,7 +1238,7 @@ singleBuild runInBase ac@ActionContext {..} ee@ExecuteEnv {..} task@Task {..} in
                         "Missing modules in the cabal file are likely to cause undefined reference errors from the linker, along with other problems."
 
         () <- announce ("build" <> annSuffix)
-        config <- asks getConfig
+        config <- view configL
         extraOpts <- extraBuildOptions wc eeBuildOpts
         cabal (configHideTHLoading config) (("build" :) $ (++ extraOpts) $
             case (taskType, taskAllInOne, isFinalBuild) of
@@ -1355,7 +1355,7 @@ singleTest runInBase topts testsToRun ac ee task installedMap = do
     -- fullblown 'withSingleContext'.
     (allDepsMap, _cache) <- getConfigCache ee task installedMap True False
     withSingleContext runInBase ac ee task (Just allDepsMap) (Just "test") $ \package _cabalfp pkgDir _cabal announce _console mlogFile -> do
-        config <- asks getConfig
+        config <- view configL
         let needHpc = toCoverage topts
 
         toRun <-

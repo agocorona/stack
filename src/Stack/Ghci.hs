@@ -27,7 +27,6 @@ import           Control.Monad hiding (forM)
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
-import           Control.Monad.Reader (asks)
 import           Control.Monad.State.Strict (State, execState, get, modify)
 import           Control.Monad.Trans.Unlift (MonadBaseUnlift)
 import qualified Data.ByteString.Char8 as S8
@@ -241,7 +240,7 @@ checkTargets
 checkTargets mp = do
     let filtered = M.filter (== STUnknown) mp
     unless (M.null filtered) $ do
-        bconfig <- asks getBuildConfig
+        bconfig <- view buildConfigLocalL
         throwM $ UnknownTargets (M.keysSet filtered) M.empty (bcStackYaml bconfig)
 
 getAllLocalTargets
@@ -321,8 +320,10 @@ runGhci
     -> [GhciPkgInfo]
     -> m ()
 runGhci GhciOpts{..} targets mainIsTargets pkgs = do
-    config <- asks getConfig
-    bconfig <- asks getBuildConfig
+    config <- view configL
+    bconfignl <- view buildConfigNoLocalL
+    bconfigl <- view buildConfigLocalL
+    let bconfig = BuildConfig bconfignl bconfigl
     wc <- getWhichCompiler
     let pkgopts = hidePkgOpt ++ genOpts ++ ghcOpts
         hidePkgOpt = if null pkgs || not ghciHidePackages then [] else ["-hide-all-packages"]
@@ -371,7 +372,7 @@ runGhci GhciOpts{..} targets mainIsTargets pkgs = do
             else do
                 checkForDuplicateModules pkgs
                 renderFn <- interrogateExeForRenderFunction
-                bopts <- asks (configBuild . getConfig)
+                bopts <- view buildOptsL
                 mainFile <- figureOutMainFile bopts mainIsTargets targets pkgs
                 scriptPath <- writeGhciScript tmpDirectory (renderFn pkgs mainFile)
                 execGhci (macrosOptions ++ ["-ghci-script=" <> toFilePath scriptPath])
@@ -552,9 +553,11 @@ makeGhciPkgInfo
     -> SimpleTarget
     -> m GhciPkgInfo
 makeGhciPkgInfo sourceMap installedMap locals addPkgs mfileTargets name cabalfp target = do
-    bopts <- asks (configBuild . getConfig)
-    econfig <- asks getEnvConfig
-    bconfig <- asks getBuildConfig
+    bopts <- view buildOptsL
+    econfig <- view envConfigL
+    bconfignl <- view buildConfigNoLocalL
+    bconfigl <- view buildConfigLocalL
+    let bconfig = BuildConfig bconfignl bconfigl
     let config =
             PackageConfig
             { packageConfigEnableTests = True
@@ -562,7 +565,7 @@ makeGhciPkgInfo sourceMap installedMap locals addPkgs mfileTargets name cabalfp 
             , packageConfigFlags = getLocalFlags bconfig defaultBuildOptsCLI name
             , packageConfigGhcOptions = getGhcOptions bconfig defaultBuildOptsCLI name True True
             , packageConfigCompilerVersion = envConfigCompilerVersion (ecLocal econfig)
-            , packageConfigPlatform = configPlatform (getConfig bconfig)
+            , packageConfigPlatform = view platformL econfig
             }
     (warnings,gpkgdesc) <- readPackageUnresolved cabalfp
 

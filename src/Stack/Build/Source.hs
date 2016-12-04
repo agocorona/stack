@@ -29,7 +29,7 @@ import              Control.Exception (assert, catch)
 import              Control.Monad hiding (sequence)
 import              Control.Monad.IO.Class
 import              Control.Monad.Logger
-import              Control.Monad.Reader (MonadReader, asks)
+import              Control.Monad.Reader (MonadReader)
 import              Control.Monad.Trans.Resource
 import "cryptohash" Crypto.Hash (Digest, SHA256)
 import              Crypto.Hash.Conduit (sinkHash)
@@ -102,13 +102,15 @@ loadSourceMapFull :: (StackM env m, HasEnvConfig env)
                        , SourceMap
                        )
 loadSourceMapFull needTargets boptsCli = do
-    bconfig <- asks getBuildConfig
+    bconfignl <- view buildConfigNoLocalL
+    bconfigl <- view buildConfigLocalL
+    let bconfig = BuildConfig bconfignl bconfigl
     rawLocals <- getLocalPackageViews
     (mbp0, cliExtraDeps, targets) <- parseTargetsFromBuildOptsWith rawLocals needTargets boptsCli
     -- Extend extra-deps to encompass targets requested on the command line
     -- that are not in the snapshot.
     extraDeps0 <- extendExtraDeps
-        (bcExtraDeps (bcLocal bconfig))
+        (bcExtraDeps bconfigl)
         cliExtraDeps
         (Map.keysSet $ Map.filter (== STUnknown) targets)
 
@@ -144,7 +146,7 @@ loadSourceMapFull needTargets boptsCli = do
                 let flags =
                         case ( Map.lookup (Just n) $ boptsCLIFlags boptsCli
                              , Map.lookup Nothing $ boptsCLIFlags boptsCli
-                             , Map.lookup n $ unPackageFlags $ bcFlags $ bcLocal bconfig
+                             , Map.lookup n $ unPackageFlags $ bcFlags bconfigl
                              ) of
                             -- Didn't have any flag overrides, fall back to the flags
                             -- defined in the snapshot.
@@ -207,7 +209,7 @@ getGhcOptions bconfig boptsCli name isTarget isLocal = concat
     ]
   where
     bopts = configBuild config
-    config = getConfig bconfig
+    config = view configL bconfig
     includeExtraOptions =
         case configApplyGhcOptions config of
             AGOTargets -> isTarget
@@ -236,34 +238,35 @@ parseTargetsFromBuildOptsWith
     -> m (MiniBuildPlan, M.Map PackageName Version, M.Map PackageName SimpleTarget)
 parseTargetsFromBuildOptsWith rawLocals needTargets boptscli = do
     $logDebug "Parsing the targets"
-    bconfig <- asks getBuildConfig
+    bconfig <- view buildConfigNoLocalL
+    bconfigl <- view buildConfigLocalL
     mbp0 <-
-        case bcResolver $ bcNoLocal bconfig of
+        case bcResolver bconfig of
             ResolverCompiler _ -> do
                 -- We ignore the resolver version, as it might be
                 -- GhcMajorVersion, and we want the exact version
                 -- we're using.
-                version <- asks (envConfigCompilerVersion . ecLocal . getEnvConfig)
+                version <- view $ envConfigLocalL.to envConfigCompilerVersion
                 return MiniBuildPlan
                     { mbpCompilerVersion = version
                     , mbpPackages = Map.empty
                     }
-            _ -> return (bcWantedMiniBuildPlan (bcNoLocal bconfig))
+            _ -> return (bcWantedMiniBuildPlan bconfig)
     workingDir <- getCurrentDir
 
     let snapshot = mpiVersion <$> mbpPackages mbp0
     flagExtraDeps <- convertSnapshotToExtra
         snapshot
-        (bcExtraDeps (bcLocal bconfig))
+        (bcExtraDeps bconfigl)
         rawLocals
         (catMaybes $ Map.keys $ boptsCLIFlags boptscli)
 
     (cliExtraDeps, targets) <-
         parseTargets
             needTargets
-            (bcImplicitGlobal (bcLocal bconfig))
+            (bcImplicitGlobal bconfigl)
             snapshot
-            (flagExtraDeps <> bcExtraDeps (bcLocal bconfig))
+            (flagExtraDeps <> bcExtraDeps bconfigl)
             (fst <$> rawLocals)
             workingDir
             (boptsCLITargets boptscli)
@@ -361,7 +364,7 @@ loadLocalPackage
 loadLocalPackage boptsCli targets (name, (lpv, gpkg)) = do
     let mtarget = Map.lookup name targets
     config  <- getPackageConfig boptsCli name (isJust mtarget) True
-    bopts <- asks (configBuild . getConfig)
+    bopts <- view buildOptsL
     let pkg = resolvePackage config gpkg
 
         (exes, tests, benches) =
@@ -458,12 +461,12 @@ checkFlagsUsed :: (MonadThrow m, MonadReader env m, HasBuildConfig env)
                -> Map PackageName snapshot -- ^ snapshot, for error messages
                -> m ()
 checkFlagsUsed boptsCli lps extraDeps snapshot = do
-    bconfig <- asks getBuildConfig
+    bconfig <- view buildConfigLocalL
 
         -- Check if flags specified in stack.yaml and the command line are
         -- used, see https://github.com/commercialhaskell/stack/issues/617
     let flags = map (, FSCommandLine) [(k, v) | (Just k, v) <- Map.toList $ boptsCLIFlags boptsCli]
-             ++ map (, FSStackYaml) (Map.toList $ unPackageFlags $ bcFlags $ bcLocal bconfig)
+             ++ map (, FSStackYaml) (Map.toList $ unPackageFlags $ bcFlags bconfig)
 
         localNameMap = Map.fromList $ map (packageName . lpPackage &&& lpPackage) lps
         checkFlagUsed ((name, userFlags), source) =
@@ -510,11 +513,11 @@ extendExtraDeps extraDeps0 cliExtraDeps unknowns = do
     case errs of
         [] -> return $ Map.unions $ extraDeps1 : unknowns'
         _ -> do
-            bconfig <- asks getBuildConfig
+            bconfig <- view buildConfigLocalL
             throwM $ UnknownTargets
                 (Set.fromList errs)
                 Map.empty -- TODO check the cliExtraDeps for presence in index
-                (bcStackYaml (bcLocal bconfig))
+                (bcStackYaml bconfig)
   where
     extraDeps1 = Map.union extraDeps0 cliExtraDeps
     addUnknown pn = do
@@ -647,15 +650,15 @@ checkComponentsBuildable lps =
 getDefaultPackageConfig :: (MonadIO m, MonadReader env m, HasEnvConfig env)
   => m PackageConfig
 getDefaultPackageConfig = do
-  econfig <- asks getEnvConfig
-  bconfig <- asks getBuildConfig
+  platform <- view platformL
+  compilerVersion <- view $ envConfigLocalL.to envConfigCompilerVersion
   return PackageConfig
     { packageConfigEnableTests = False
     , packageConfigEnableBenchmarks = False
     , packageConfigFlags = M.empty
     , packageConfigGhcOptions = []
-    , packageConfigCompilerVersion = envConfigCompilerVersion (ecLocal econfig)
-    , packageConfigPlatform = configPlatform $ getConfig bconfig
+    , packageConfigCompilerVersion = compilerVersion
+    , packageConfigPlatform = platform
     }
 
 -- | Get 'PackageConfig' for package given its name.
@@ -666,13 +669,16 @@ getPackageConfig :: (MonadIO m, MonadReader env m, HasEnvConfig env)
   -> Bool
   -> m PackageConfig
 getPackageConfig boptsCli name isTarget isLocal = do
-  econfig <- asks getEnvConfig
-  bconfig <- asks getBuildConfig
+  econfig <- view envConfigLocalL
+  bconfignl <- view buildConfigNoLocalL
+  bconfigl <- view buildConfigLocalL
+  let bconfig = BuildConfig bconfignl bconfigl
+  platform <- view platformL
   return PackageConfig
     { packageConfigEnableTests = False
     , packageConfigEnableBenchmarks = False
     , packageConfigFlags = getLocalFlags bconfig boptsCli name
     , packageConfigGhcOptions = getGhcOptions bconfig boptsCli name isTarget isLocal
-    , packageConfigCompilerVersion = envConfigCompilerVersion (ecLocal econfig)
-    , packageConfigPlatform = configPlatform $ getConfig bconfig
+    , packageConfigCompilerVersion = envConfigCompilerVersion econfig
+    , packageConfigPlatform = platform
     }

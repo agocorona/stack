@@ -38,7 +38,8 @@ path
 path keys =
     do -- We must use a BuildConfig from an EnvConfig to ensure that it contains the
        -- full environment info including GHC paths etc.
-       bc <- asks (getBuildConfig . getEnvConfig)
+       bcnl <- view $ envConfigL.buildConfigNoLocalL
+       bcl <- view $ envConfigL.buildConfigLocalL
        -- This is the modified 'bin-path',
        -- including the local GHC or MSYS if not configured to operate on
        -- global GHC.
@@ -77,7 +78,7 @@ path keys =
                           else key <> ": ") <>
                       path'
                           (PathInfo
-                               bc
+                               (BuildConfig bcnl bcl)
                                menv
                                snap
                                plocal
@@ -127,7 +128,7 @@ paths :: [(String, Text, PathInfo -> Text)]
 paths =
     [ ( "Global stack root directory"
       , T.pack stackRootOptionName
-      , T.pack . toFilePathNoTrailingSep . configStackRoot . getConfig . piBuildConfig )
+      , T.pack . toFilePathNoTrailingSep . view stackRootL . piBuildConfig )
     , ( "Project root (derived from stack.yaml file)"
       , "project-root"
       , T.pack . toFilePathNoTrailingSep . bcRoot . piBuildConfig )
@@ -139,7 +140,7 @@ paths =
       , T.pack . intercalate [FP.searchPathSeparator] . eoPath . piEnvOverride )
     , ( "Install location for GHC and other core tools"
       , "programs"
-      , T.pack . toFilePathNoTrailingSep . configLocalPrograms . getConfig . piBuildConfig )
+      , T.pack . toFilePathNoTrailingSep . configLocalPrograms . view configL . piBuildConfig )
     , ( "Compiler binary (e.g. ghc)"
       , "compiler-exe"
       , T.pack . toFilePath . piCompiler )
@@ -148,13 +149,13 @@ paths =
       , T.pack . toFilePathNoTrailingSep . parent . piCompiler )
     , ( "Local bin dir where stack installs executables (e.g. ~/.local/bin)"
       , "local-bin"
-      , T.pack . toFilePathNoTrailingSep . configLocalBin . getConfig . piBuildConfig )
+      , T.pack . toFilePathNoTrailingSep . configLocalBin . view configL . piBuildConfig )
     , ( "Extra include directories"
       , "extra-include-dirs"
-      , T.intercalate ", " . map (T.pack . toFilePathNoTrailingSep) . Set.elems . configExtraIncludeDirs . getConfig . piBuildConfig )
+      , T.intercalate ", " . map (T.pack . toFilePathNoTrailingSep) . Set.elems . configExtraIncludeDirs . view configL . piBuildConfig )
     , ( "Extra library directories"
       , "extra-library-dirs"
-      , T.intercalate ", " . map (T.pack . toFilePathNoTrailingSep) . Set.elems . configExtraLibDirs . getConfig . piBuildConfig )
+      , T.intercalate ", " . map (T.pack . toFilePathNoTrailingSep) . Set.elems . configExtraLibDirs . view configL . piBuildConfig )
     , ( "Snapshot package database"
       , "snapshot-pkg-db"
       , T.pack . toFilePathNoTrailingSep . piSnapDb )
@@ -187,13 +188,13 @@ paths =
       , T.pack . toFilePathNoTrailingSep . piHpcDir )
     , ( "DEPRECATED: Use '--local-bin' instead"
       , "local-bin-path"
-      , T.pack . toFilePathNoTrailingSep . configLocalBin . getConfig . piBuildConfig )
+      , T.pack . toFilePathNoTrailingSep . configLocalBin . view configL . piBuildConfig )
     , ( "DEPRECATED: Use '--programs' instead"
       , "ghc-paths"
-      , T.pack . toFilePathNoTrailingSep . configLocalPrograms . getConfig . piBuildConfig )
+      , T.pack . toFilePathNoTrailingSep . configLocalPrograms . view configL . piBuildConfig )
     , ( "DEPRECATED: Use '--" <> stackRootOptionName <> "' instead"
       , T.pack deprecatedStackRootOptionName
-      , T.pack . toFilePathNoTrailingSep . configStackRoot . getConfig . piBuildConfig )
+      , T.pack . toFilePathNoTrailingSep . view stackRootL . piBuildConfig )
     ]
 
 deprecatedPathKeys :: [(Text, Text)]

@@ -554,7 +554,7 @@ configureOptsNoDir econfig bco deps isLocal package = concat
     ]
   where
     wc = whichCompiler (envConfigCompilerVersion (ecLocal econfig))
-    config = getConfig econfig
+    config = view configL econfig
     bopts = bcoBuildOpts bco
 
     -- TODO: instead always enable this when the cabal version is new

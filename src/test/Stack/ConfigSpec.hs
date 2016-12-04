@@ -133,8 +133,8 @@ spec = beforeAll setup $ do
           LoadConfig{..} <- loadConfig'
           BuildConfig{..} <- loadBuildConfigRest
                                 (lcLoadBuildConfig Nothing)
-          bcStackYaml `shouldBe` dir </> stackDotYaml
-          parent bcStackYaml `shouldBe` dir
+          bcStackYaml bcLocal `shouldBe` dir </> stackDotYaml
+          parent (bcStackYaml bcLocal)`shouldBe` dir
 
     it "STACK_YAML can be relative" $ inTempDir $ do
         parentDir <- getCurrentDirectory >>= parseAbsDir
@@ -147,7 +147,7 @@ spec = beforeAll setup $ do
             LoadConfig{..} <- loadConfig'
             BuildConfig{..} <- loadBuildConfigRest
                                 (lcLoadBuildConfig Nothing)
-            bcStackYaml `shouldBe` yamlAbs
+            bcStackYaml bcLocal `shouldBe` yamlAbs
 
   describe "defaultConfigYaml" $
     it "is parseable" $ \_ -> do

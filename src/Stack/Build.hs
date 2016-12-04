@@ -92,7 +92,7 @@ build :: (StackM env m, HasEnvConfig env, MonadBaseUnlift IO m)
       -> BuildOptsCLI
       -> m ()
 build setLocalFiles mbuildLk boptsCli = fixCodePage $ do
-    bopts <- asks (configBuild . getConfig)
+    bopts <- view buildOptsL
     let profiling = boptsLibProfile bopts || boptsExeProfile bopts
     let symbols = boptsLibStrip bopts || boptsExeStrip bopts
     menv <- getMinimalEnvOverride
@@ -157,7 +157,7 @@ allLocal =
 
 checkCabalVersion :: (StackM env m, HasEnvConfig env) => m ()
 checkCabalVersion = do
-    allowNewer <- asks (configAllowNewer . getConfig)
+    allowNewer <- view $ configL.to configAllowNewer
     cabalVer <- asks (envConfigCabalVersion . getEnvConfigLocal)
     -- https://github.com/haskell/cabal/issues/2023
     when (allowNewer && cabalVer < $(mkVersion "1.22")) $ throwM $
@@ -282,7 +282,7 @@ splitObjsWarning = unwords
 mkBaseConfigOpts :: (MonadIO m, MonadReader env m, HasEnvConfig env, MonadThrow m)
                  => BuildOptsCLI -> m BaseConfigOpts
 mkBaseConfigOpts boptsCli = do
-    bopts <- asks (configBuild . getConfig)
+    bopts <- view buildOptsL
     snapDBPath <- packageDatabaseDeps
     localDBPath <- packageDatabaseLocal
     snapInstallRoot <- installationRootDeps
@@ -304,7 +304,7 @@ withLoadPackage :: (StackM env m, HasEnvConfig env, MonadBaseUnlift IO m)
                 -> ((PackageName -> Version -> Map FlagName Bool -> [Text] -> IO Package) -> m a)
                 -> m a
 withLoadPackage menv inner = do
-    econfig <- asks getEnvConfig
+    econfig <- view envConfigL
     withCabalLoader menv $ \cabalLoader ->
         inner $ \name version flags ghcOptions -> do
             bs <- cabalLoader $ PackageIdentifier name version
@@ -323,7 +323,7 @@ withLoadPackage menv inner = do
         , packageConfigFlags = flags
         , packageConfigGhcOptions = ghcOptions
         , packageConfigCompilerVersion = envConfigCompilerVersion (ecLocal econfig)
-        , packageConfigPlatform = configPlatform (getConfig econfig)
+        , packageConfigPlatform = view platformL econfig
         }
 
 -- | Set the code page for this process as necessary. Only applies to Windows.
